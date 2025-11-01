@@ -1,0 +1,22 @@
+# Web App Framework
+streamlit
+
+# Vector Database Client
+pinecone-client
+
+# Core Framework for connecting data to LLMs
+llama-index
+
+# Utility for loading API keys from .env file
+python-dotenv
+
+# LlamaIndex integrations for specific services
+llama-index-vector-stores-pinecone
+llama-index-llms-openai
+llama-index-embeddings-openai
+# ... (all the other requirements) ...
+llama-index-llms-anthropic
+
+# Added for PDF processing
+llama-index-readers-file
+pypdf
