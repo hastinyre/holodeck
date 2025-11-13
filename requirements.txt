@@ -23,3 +23,7 @@ pypdf
 
 # For making HTTP requests to GeoIP API
 requests
+
+# For Google Sheets Integration
+gspread
+google-auth-oauthlib
