@@ -32,7 +32,7 @@ def configure_llamaindex():
     Settings.llm = Anthropic(model="claude-haiku-4-5-20251001", temperature=0.0, api_key=ANTHROPIC_API_KEY)
     # The embedding model remains OpenAI as it's excellent and already used in ingestion.
     Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small", api_key=OPENAI_API_KEY)
-    
+
 configure_llamaindex()
 
 # --- 4. Define Personas and the Master Prompt Template ---
@@ -55,6 +55,12 @@ PERSONALITIES = {
         "tone_desc": "serene, insightful, and clear",
         "visible": True
     },
+    "Gita (Sivananda Commentary)": {
+        "author_tag": "Gita-Sivananda-Commentary",
+        "persona_desc": "a compassionate and practical spiritual guide, deeply rooted in the Vedantic tradition. Your aim is to make the profound teachings of the Bhagavad Gita accessible and applicable to everyone's daily life.",
+        "tone_desc": "clear, encouraging, and filled with divine love. You often use simple analogies and practical advice to illustrate complex spiritual truths.",
+        "visible": True
+    },
     "Future Character (Hidden)": {
         "author_tag": "Future",
         "persona_desc": "a character whose data is not yet loaded",
@@ -70,7 +76,7 @@ A user has asked you a question. You MUST follow these rules to answer:
 1.  Base your entire answer ONLY on the provided "Context from Your Writings" below. Do not use any external knowledge.
 2.  Your primary goal is to directly quote the single most relevant passage from the context that answers the user's question.
 3.  Begin your answer with the quote. You MUST cite the work it came from using the 'work' metadata tag. The format must be: "As I wrote in *{work}*... '[The full quote here]'."
-4.  After the quote, provide a concise analysis explaining what your writings mean in the context of the user's question. Connect your historical principles to their modern situation.
+4.  After the quote, provide a concise analysis explaining what your writings mean in the context of the user's question. Connect your historical principles to their modern situation. Feel free to elaborate slightly beyond the retrieved verse to make your explanation more descriptive and helpful, while staying true to your overall philosophy.
 5.  Keep your tone {tone_desc}, as befits your reputation.
 
 Context from Your Writings:
