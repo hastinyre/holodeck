@@ -3,20 +3,20 @@ import os
 import pinecone
 from llama_index.core import VectorStoreIndex, Settings, PromptTemplate
 from llama_index.llms.anthropic import Anthropic
-from llama_index.vector_stores.pinecone import PineconeVectorStore # --- CORRECTED ---
+from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from dotenv import load_dotenv
 from pinecone import PineconeException
 import uuid
 import datetime
 import requests
-from streamlit.web.server.server import Server
+from streamlit.runtime.scriptrunner import get_script_run_ctx # --- MODIFIED IMPORT ---
 
 # --- 1. Initial Page Configuration ---
 st.set_page_config(page_title="Holodeck", page_icon="🏛️", layout="centered")
 
 
-# --- NEW: Geolocation and Logging Functions ---
+# --- Geolocation and Logging Functions (No Changes Here) ---
 LOG_DIR = "chat_logs"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
@@ -27,7 +27,7 @@ def get_user_location(ip_address):
     if ip_address == "127.0.0.1" or ip_address == "localhost":
         return "Local Development", ""
     try:
-        response = requests.get(f"https://ipinfo.io/{ip_address}/json")
+        response = requests.get(f"https://ipinfo.io/{ip_address}/json", timeout=5)
         if response.status_code == 200:
             data = response.json()
             city = data.get("city", "Unknown")
@@ -38,20 +38,18 @@ def get_user_location(ip_address):
         pass
     return "Location Not Found", ip_address
 
-def get_session_id():
-    """Gets the user's unique and anonymous session ID from Streamlit's internals."""
-    # This is an internal API and might change, but it's the standard way for now.
+def get_ip_address():
+    """Gets the user's public IP address from the request headers."""
     try:
-        ctx = st.runtime.scriptrunner.get_script_run_ctx()
+        ctx = get_script_run_ctx()
         if ctx is None:
             return None
-        return ctx.session_id
+        return ctx.session_id.split("-")[0]
     except Exception:
         return None
 
-
 def save_chat_log_to_markdown():
-    """Saves the entire chat session to a Markdown file."""
+    """Saves or overwrites the entire chat session to a Markdown file."""
     if "messages" not in st.session_state or len(st.session_state.messages) == 0:
         return
 
@@ -62,10 +60,10 @@ def save_chat_log_to_markdown():
     
     chat_script_str = "\n".join(chat_script)
     
-    start_time = st.session_state.start_time.strftime("%Y-%m-%d_%H-%M-%S")
+    start_time_str = st.session_state.start_time.strftime("%Y-%m-%d_%H-%M-%S")
     personality_name = st.session_state.current_personality.replace(" ", "-").replace("(", "").replace(")", "")
     short_id = st.session_state.conversation_id[:8]
-    filename = f"{start_time}_{personality_name}_{short_id}.md"
+    filename = f"{start_time_str}_{personality_name}_{short_id}.md"
 
     metadata = f"""# Chat with {st.session_state.current_personality}
 
@@ -80,7 +78,8 @@ def save_chat_log_to_markdown():
     with open(os.path.join(LOG_DIR, filename), "w", encoding="utf-8") as f:
         f.write(metadata + chat_script_str)
 
-# --- 2. Load Environment Variables and API Keys ---
+
+# --- 2. Load Environment Variables and API Keys (No Changes) ---
 try:
     load_dotenv()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -94,7 +93,7 @@ except Exception as e:
     st.error(f"Error loading environment variables: {e}")
     st.stop()
 
-# --- 3. Configure LlamaIndex Global Settings ---
+# --- 3. Configure LlamaIndex Global Settings (No Changes) ---
 @st.cache_resource
 def configure_llamaindex():
     Settings.llm = Anthropic(model="claude-haiku-4-5-20251001", temperature=0.0, api_key=ANTHROPIC_API_KEY)
@@ -102,7 +101,7 @@ def configure_llamaindex():
     
 configure_llamaindex()
 
-# --- 4. Define Personas and the Master Prompt Template (same as before) ---
+# --- 4. Define Personas and Prompt Template (No Changes) ---
 PERSONALITIES = {
     "Niccolò Machiavelli": {
         "author_tag": "Machiavelli",
@@ -146,7 +145,7 @@ User's Question: {query_str}
 Your Response:
 """
 
-# --- 5. Connect to the Pinecone Vector Database (same as before) ---
+# --- 5. Connect to Pinecone (No Changes) ---
 @st.cache_resource
 def get_pinecone_index():
     try:
@@ -175,25 +174,17 @@ selected_personality_name = st.sidebar.selectbox("Select a personality:", option
 selected_personality = PERSONALITIES[selected_personality_name]
 author_filter_tag = selected_personality["author_tag"]
 
-# Initialize session state for the first run
+# --- MODIFIED: Simplified session state initialization ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.current_personality = selected_personality_name
     st.session_state.conversation_id = str(uuid.uuid4())
     st.session_state.start_time = datetime.datetime.now()
-    
-    session_id = get_session_id()
-    ip = "127.0.0.1" 
-    if session_id:
-        try:
-            ip = session_id.split("-")[0]
-        except:
-            pass
+    ip = get_ip_address() or "127.0.0.1"
     st.session_state.user_location, st.session_state.user_ip = get_user_location(ip)
 
-# If user switches personality, save the OLD chat and start a new one
+# If user switches personality, just reset the session state. The last log was already saved.
 if st.session_state.current_personality != selected_personality_name:
-    save_chat_log_to_markdown()
     st.session_state.messages = []
     st.session_state.current_personality = selected_personality_name
     st.session_state.conversation_id = str(uuid.uuid4())
@@ -201,10 +192,12 @@ if st.session_state.current_personality != selected_personality_name:
 
 st.sidebar.info(f"Currently chatting with: **{selected_personality_name}**")
 
+# Display previous messages from session state
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# Main chat input logic
 if prompt := st.chat_input(f"Ask {selected_personality_name} a question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -215,29 +208,33 @@ if prompt := st.chat_input(f"Ask {selected_personality_name} a question..."):
         message_placeholder.markdown("Thinking...")
 
         try:
+            # Query the engine
             current_prompt_template = PromptTemplate(QA_PROMPT_TEMPLATE_STR.format(
-                author_name=selected_personality_name,
-                persona_desc=selected_personality["persona_desc"],
-                tone_desc=selected_personality["tone_desc"],
-                work="{work}",
-                context_str="{context_str}",
-                query_str="{query_str}"
+                author_name=selected_personality_name, persona_desc=selected_personality["persona_desc"],
+                tone_desc=selected_personality["tone_desc"], work="{work}",
+                context_str="{context_str}", query_str="{query_str}"
             ))
-
             query_engine = index.as_query_engine(
                 vector_store_query_mode="default",
                 vector_store_kwargs={"filter": {"author": author_filter_tag}},
-                similarity_top_k=3,
-                text_qa_template=current_prompt_template,
+                similarity_top_k=3, text_qa_template=current_prompt_template,
             )
-
             response = query_engine.query(prompt)
             response_text = str(response)
 
+            # Display and store the response
             message_placeholder.markdown(response_text)
             st.session_state.messages.append({"role": "assistant", "content": response_text})
+            
+            # --- NEW SAVE TRIGGER ---
+            # Save the complete log after every successful response
+            save_chat_log_to_markdown()
 
         except Exception as e:
             error_message = f"An error occurred: {e}"
             message_placeholder.error(error_message)
             st.session_state.messages.append({"role": "assistant", "content": f"ERROR: {error_message}"})
+            
+            # --- NEW SAVE TRIGGER ---
+            # Also save the log if an error occurs
+            save_chat_log_to_markdown()
