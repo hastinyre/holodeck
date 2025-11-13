@@ -3,14 +3,14 @@ import os
 import pinecone
 from llama_index.core import VectorStoreIndex, Settings, PromptTemplate
 from llama_index.llms.anthropic import Anthropic
-from llama_index.vector_stores.pinecone import PineStoreVectorStore
+from llama_index.vector_stores.pinecone import PineconeVectorStore # --- CORRECTED ---
 from llama_index.embeddings.openai import OpenAIEmbedding
 from dotenv import load_dotenv
 from pinecone import PineconeException
 import uuid
 import datetime
-import requests # --- NEW ---
-from streamlit.web.server.server import Server # --- NEW ---
+import requests
+from streamlit.web.server.server import Server
 
 # --- 1. Initial Page Configuration ---
 st.set_page_config(page_title="Holodeck", page_icon="🏛️", layout="centered")
@@ -21,7 +21,7 @@ LOG_DIR = "chat_logs"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
-@st.cache_data(ttl=3600) # Cache the result for an hour to avoid repeated API calls for the same IP
+@st.cache_data(ttl=3600)
 def get_user_location(ip_address):
     """Fetches user's approximate location from their IP address."""
     if ip_address == "127.0.0.1" or ip_address == "localhost":
@@ -40,17 +40,21 @@ def get_user_location(ip_address):
 
 def get_session_id():
     """Gets the user's unique and anonymous session ID from Streamlit's internals."""
-    session_info = Server.get_current()._get_session_info_for_client(None)
-    if session_info:
-        return session_info.session.id
-    return None
+    # This is an internal API and might change, but it's the standard way for now.
+    try:
+        ctx = st.runtime.scriptrunner.get_script_run_ctx()
+        if ctx is None:
+            return None
+        return ctx.session_id
+    except Exception:
+        return None
+
 
 def save_chat_log_to_markdown():
     """Saves the entire chat session to a Markdown file."""
     if "messages" not in st.session_state or len(st.session_state.messages) == 0:
-        return # Don't save empty chats
+        return
 
-    # Format the messages
     chat_script = []
     for msg in st.session_state.messages:
         role = "User" if msg["role"] == "user" else "Assistant"
@@ -58,9 +62,8 @@ def save_chat_log_to_markdown():
     
     chat_script_str = "\n".join(chat_script)
     
-    # Create metadata
     start_time = st.session_state.start_time.strftime("%Y-%m-%d_%H-%M-%S")
-    personality_name = st.session_state.current_personality.replace(" ", "-")
+    personality_name = st.session_state.current_personality.replace(" ", "-").replace("(", "").replace(")", "")
     short_id = st.session_state.conversation_id[:8]
     filename = f"{start_time}_{personality_name}_{short_id}.md"
 
@@ -74,12 +77,8 @@ def save_chat_log_to_markdown():
 ---
 
 """
-    # Write the file
     with open(os.path.join(LOG_DIR, filename), "w", encoding="utf-8") as f:
         f.write(metadata + chat_script_str)
-
-# --- END NEW ---
-
 
 # --- 2. Load Environment Variables and API Keys ---
 try:
@@ -133,21 +132,17 @@ PERSONALITIES = {
 
 QA_PROMPT_TEMPLATE_STR = """
 You are the spirit of {author_name}. Your persona is {persona_desc}. You are acting as a counselor to a modern-day individual, offering them timeless advice based solely on your own writings.
-
-A user has asked you a question. You MUST follow these rules to answer:
+You MUST follow these rules to answer:
 1.  Base your entire answer ONLY on the provided "Context from Your Writings" below. Do not use any external knowledge.
 2.  Your primary goal is to directly quote the single most relevant passage from the context that answers the user's question.
 3.  Begin your answer with the quote. You MUST cite the work it came from using the 'work' metadata tag. The format must be: "As I wrote in *{work}*... '[The full quote here]'."
 4.  After the quote, provide a concise analysis explaining what your writings mean in the context of the user's question. Connect your historical principles to their modern situation.
 5.  Keep your tone {tone_desc}, as befits your reputation.
-
 Context from Your Writings:
 ---------------------
 {context_str}
 ---------------------
-
 User's Question: {query_str}
-
 Your Response:
 """
 
@@ -173,7 +168,6 @@ index = get_pinecone_index()
 st.title("🏛️ Holodeck")
 st.markdown("Chat with digital historical figures, powered by their actual writings.")
 
-# --- MODIFIED: Sidebar and session initialization ---
 st.sidebar.header("Choose a Thinker")
 visible_personalities = [p for p, d in PERSONALITIES.items() if d["visible"]]
 selected_personality_name = st.sidebar.selectbox("Select a personality:", options=visible_personalities)
@@ -181,30 +175,31 @@ selected_personality_name = st.sidebar.selectbox("Select a personality:", option
 selected_personality = PERSONALITIES[selected_personality_name]
 author_filter_tag = selected_personality["author_tag"]
 
-# This block is now redesigned for saving logs
+# Initialize session state for the first run
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.current_personality = selected_personality_name
     st.session_state.conversation_id = str(uuid.uuid4())
     st.session_state.start_time = datetime.datetime.now()
-    # Get user IP and location ONCE per session
+    
     session_id = get_session_id()
+    ip = "127.0.0.1" 
     if session_id:
-        st.session_state.user_location, st.session_state.user_ip = get_user_location(session_id.split("-")[0])
-    else: # Fallback for local development or if session_id is not available
-        st.session_state.user_location, st.session_state.user_ip = get_user_location("127.0.0.1")
+        try:
+            ip = session_id.split("-")[0]
+        except:
+            pass
+    st.session_state.user_location, st.session_state.user_ip = get_user_location(ip)
 
 # If user switches personality, save the OLD chat and start a new one
 if st.session_state.current_personality != selected_personality_name:
-    save_chat_log_to_markdown() # Save the previous chat
-    # Now, reset the session state for the new chat
+    save_chat_log_to_markdown()
     st.session_state.messages = []
     st.session_state.current_personality = selected_personality_name
     st.session_state.conversation_id = str(uuid.uuid4())
     st.session_state.start_time = datetime.datetime.now()
 
 st.sidebar.info(f"Currently chatting with: **{selected_personality_name}**")
-# --- END MODIFIED SECTION ---
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -246,6 +241,3 @@ if prompt := st.chat_input(f"Ask {selected_personality_name} a question..."):
             error_message = f"An error occurred: {e}"
             message_placeholder.error(error_message)
             st.session_state.messages.append({"role": "assistant", "content": f"ERROR: {error_message}"})
-
-# Note: The actual saving now happens when the personality is switched or session ends.
-# This is more robust than saving on every message.
