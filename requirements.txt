@@ -20,3 +20,6 @@ llama-index-llms-anthropic
 # Added for PDF processing
 llama-index-readers-file
 pypdf
+
+# For making HTTP requests to GeoIP API
+requests

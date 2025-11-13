@@ -3,13 +3,83 @@ import os
 import pinecone
 from llama_index.core import VectorStoreIndex, Settings, PromptTemplate
 from llama_index.llms.anthropic import Anthropic
-from llama_index.vector_stores.pinecone import PineconeVectorStore
+from llama_index.vector_stores.pinecone import PineStoreVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from dotenv import load_dotenv
 from pinecone import PineconeException
+import uuid
+import datetime
+import requests # --- NEW ---
+from streamlit.web.server.server import Server # --- NEW ---
 
 # --- 1. Initial Page Configuration ---
 st.set_page_config(page_title="Holodeck", page_icon="🏛️", layout="centered")
+
+
+# --- NEW: Geolocation and Logging Functions ---
+LOG_DIR = "chat_logs"
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+
+@st.cache_data(ttl=3600) # Cache the result for an hour to avoid repeated API calls for the same IP
+def get_user_location(ip_address):
+    """Fetches user's approximate location from their IP address."""
+    if ip_address == "127.0.0.1" or ip_address == "localhost":
+        return "Local Development", ""
+    try:
+        response = requests.get(f"https://ipinfo.io/{ip_address}/json")
+        if response.status_code == 200:
+            data = response.json()
+            city = data.get("city", "Unknown")
+            region = data.get("region", "Unknown")
+            country = data.get("country", "Unknown")
+            return f"{city}, {region}, {country}", data.get("ip", ip_address)
+    except Exception:
+        pass
+    return "Location Not Found", ip_address
+
+def get_session_id():
+    """Gets the user's unique and anonymous session ID from Streamlit's internals."""
+    session_info = Server.get_current()._get_session_info_for_client(None)
+    if session_info:
+        return session_info.session.id
+    return None
+
+def save_chat_log_to_markdown():
+    """Saves the entire chat session to a Markdown file."""
+    if "messages" not in st.session_state or len(st.session_state.messages) == 0:
+        return # Don't save empty chats
+
+    # Format the messages
+    chat_script = []
+    for msg in st.session_state.messages:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        chat_script.append(f"{role}: {msg['content']}\n")
+    
+    chat_script_str = "\n".join(chat_script)
+    
+    # Create metadata
+    start_time = st.session_state.start_time.strftime("%Y-%m-%d_%H-%M-%S")
+    personality_name = st.session_state.current_personality.replace(" ", "-")
+    short_id = st.session_state.conversation_id[:8]
+    filename = f"{start_time}_{personality_name}_{short_id}.md"
+
+    metadata = f"""# Chat with {st.session_state.current_personality}
+
+- **Session Start:** {st.session_state.start_time.strftime("%Y-%m-%d %H:%M:%S")}
+- **Conversation ID:** {st.session_state.conversation_id}
+- **User Location:** {st.session_state.user_location}
+- **User IP:** {st.session_state.user_ip}
+
+---
+
+"""
+    # Write the file
+    with open(os.path.join(LOG_DIR, filename), "w", encoding="utf-8") as f:
+        f.write(metadata + chat_script_str)
+
+# --- END NEW ---
+
 
 # --- 2. Load Environment Variables and API Keys ---
 try:
@@ -28,14 +98,12 @@ except Exception as e:
 # --- 3. Configure LlamaIndex Global Settings ---
 @st.cache_resource
 def configure_llamaindex():
-    # --- [CORRECTED] Using the precise Claude Haiku 4.5 API ID you provided ---
     Settings.llm = Anthropic(model="claude-haiku-4-5-20251001", temperature=0.0, api_key=ANTHROPIC_API_KEY)
-    # The embedding model remains OpenAI as it's excellent and already used in ingestion.
     Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small", api_key=OPENAI_API_KEY)
     
 configure_llamaindex()
 
-# --- 4. Define Personas and the Master Prompt Template ---
+# --- 4. Define Personas and the Master Prompt Template (same as before) ---
 PERSONALITIES = {
     "Niccolò Machiavelli": {
         "author_tag": "Machiavelli",
@@ -43,16 +111,16 @@ PERSONALITIES = {
         "tone_desc": "sharp, direct, and unsentimental",
         "visible": True
     },
-    "NCERT Geography": {
-        "author_tag": "NCERT Geography",
-        "persona_desc": "a knowledgeable and clear-spoken geography educator",
-        "tone_desc": "informative, structured, and objective",
-        "visible": True
-    },
     "Gita (Krishnananda Commentary)": {
         "author_tag": "Gita-Krishnananda-Commentary",
         "persona_desc": "a wise and compassionate spiritual teacher, explaining the profound truths of the Bhagavad Gita for modern life",
         "tone_desc": "serene, insightful, and clear",
+        "visible": True
+    },
+    "NCERT Geography": {
+        "author_tag": "NCERT Geography",
+        "persona_desc": "a knowledgeable and clear-spoken geography educator",
+        "tone_desc": "informative, structured, and objective",
         "visible": True
     },
     "Future Character (Hidden)": {
@@ -83,7 +151,7 @@ User's Question: {query_str}
 Your Response:
 """
 
-# --- 5. Connect to the Pinecone Vector Database ---
+# --- 5. Connect to the Pinecone Vector Database (same as before) ---
 @st.cache_resource
 def get_pinecone_index():
     try:
@@ -105,6 +173,7 @@ index = get_pinecone_index()
 st.title("🏛️ Holodeck")
 st.markdown("Chat with digital historical figures, powered by their actual writings.")
 
+# --- MODIFIED: Sidebar and session initialization ---
 st.sidebar.header("Choose a Thinker")
 visible_personalities = [p for p, d in PERSONALITIES.items() if d["visible"]]
 selected_personality_name = st.sidebar.selectbox("Select a personality:", options=visible_personalities)
@@ -112,11 +181,30 @@ selected_personality_name = st.sidebar.selectbox("Select a personality:", option
 selected_personality = PERSONALITIES[selected_personality_name]
 author_filter_tag = selected_personality["author_tag"]
 
-if "messages" not in st.session_state or st.session_state.get("current_personality") != selected_personality_name:
+# This block is now redesigned for saving logs
+if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.current_personality = selected_personality_name
+    st.session_state.conversation_id = str(uuid.uuid4())
+    st.session_state.start_time = datetime.datetime.now()
+    # Get user IP and location ONCE per session
+    session_id = get_session_id()
+    if session_id:
+        st.session_state.user_location, st.session_state.user_ip = get_user_location(session_id.split("-")[0])
+    else: # Fallback for local development or if session_id is not available
+        st.session_state.user_location, st.session_state.user_ip = get_user_location("127.0.0.1")
+
+# If user switches personality, save the OLD chat and start a new one
+if st.session_state.current_personality != selected_personality_name:
+    save_chat_log_to_markdown() # Save the previous chat
+    # Now, reset the session state for the new chat
+    st.session_state.messages = []
+    st.session_state.current_personality = selected_personality_name
+    st.session_state.conversation_id = str(uuid.uuid4())
+    st.session_state.start_time = datetime.datetime.now()
 
 st.sidebar.info(f"Currently chatting with: **{selected_personality_name}**")
+# --- END MODIFIED SECTION ---
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -157,4 +245,7 @@ if prompt := st.chat_input(f"Ask {selected_personality_name} a question..."):
         except Exception as e:
             error_message = f"An error occurred: {e}"
             message_placeholder.error(error_message)
-            st.session_state.messages.append({"role": "assistant", "content": error_message})
+            st.session_state.messages.append({"role": "assistant", "content": f"ERROR: {error_message}"})
+
+# Note: The actual saving now happens when the personality is switched or session ends.
+# This is more robust than saving on every message.
