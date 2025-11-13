@@ -1,25 +1,23 @@
 # Web App Framework
-streamlit
+streamlit==1.35.0
 
 # Vector Database Client
-pinecone-client
+# Pinning to 3.x series for stability with LlamaIndex
+pinecone-client==3.2.2
 
 # Core Framework for connecting data to LLMs
-llama-index
+llama-index==0.10.34
 
 # Utility for loading API keys from .env file
-python-dotenv
+python-dotenv==1.0.1
 
 # LlamaIndex integrations for specific services
-llama-index-vector-stores-pinecone
-llama-index-llms-openai
-llama-index-embeddings-openai
-# ... (all the other requirements) ...
-llama-index-llms-anthropic
+llama-index-vector-stores-pinecone==0.1.4
+llama-index-llms-openai==0.1.16
+llama-index-embeddings-openai==0.1.9
+llama-index-llms-anthropic==0.1.7
 
-# Added for PDF processing
-llama-index-readers-file
-pypdf
-
-# For making HTTP requests to GeoIP API
-requests
+# PDF processing and other utilities
+llama-index-readers-file==0.1.22
+pypdf==4.2.0
+requests==2.31.0
