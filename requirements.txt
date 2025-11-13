@@ -2,7 +2,7 @@
 streamlit
 
 # Vector Database Client
-pinecone
+pinecone-client
 
 # Core Framework for connecting data to LLMs
 llama-index
@@ -20,10 +20,3 @@ llama-index-llms-anthropic
 # Added for PDF processing
 llama-index-readers-file
 pypdf
-
-# For making HTTP requests to GeoIP API
-requests
-
-# For Google Sheets Integration
-gspread
-google-auth-oauthlib
